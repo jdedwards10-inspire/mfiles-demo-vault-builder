@@ -1,0 +1,32 @@
+# Stray nested copy / working folder (never commit)
+MFilesYamlUpdater/
+test ps/
+example.txt
+
+# Generated demo schemas & data (Claude writes these per demo — not source)
+*-vault.yaml
+*-demo-data.yaml
+demo-data.yaml
+accounting-firm.yaml
+sample-*.yaml
+
+# Generated document files
+*-demo-files/
+demo-files/
+hr-demo-files/
+factory-test/
+
+# Diagnostic / scratch probes
+test-*.ps1
+discover-*.ps1
+Load-Objects.ps1
+
+# Local secrets / creds (never commit)
+*.pw
+*.secret
+*.env
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+*.swp
