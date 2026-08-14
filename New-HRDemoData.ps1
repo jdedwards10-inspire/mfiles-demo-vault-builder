@@ -48,6 +48,29 @@ function Rand($arr) { $arr[(Get-Random -Max $arr.Count)] }
 function Money { [math]::Round((Get-Random -Minimum 42000 -Maximum 240000) / 100.0, 0) * 100 }
 function DateIn([string]$y) { '{0}-{1:00}-{2:00}' -f $y, (Get-Random -Min 1 -Max 13), (Get-Random -Min 1 -Max 28) }
 
+# ---------- schema alignment (must match the deployed hr-vault.yaml) ---------
+# Map generator doc "kinds" to the actual Document class names in the vault.
+$classByKind = @{ 'Resume' = 'Resume / CV' }
+function Get-MappedClass([string]$kind) { if ($classByKind.ContainsKey($kind)) { $classByKind[$kind] } else { $kind } }
+
+# Only these property definitions exist in the schema. Drop anything else, and
+# rename the generator's 'Salary' to the schema's 'Annual Salary'.
+$validPropNames = @(
+    'Employee ID','Job Title','Work Email','Phone','Cost Center','Manager Name',
+    'Annual Salary','Headcount','Hire Date','Termination Date','Effective Date',
+    'Review Date','Due Date','Notes','Department','Employee','Department Type',
+    'Employment Status','Employment Type','Job Level','Location','Leave Type',
+    'Review Rating','Benefit Plan'
+)
+function Select-ValidProps($props) {
+    $out = [ordered]@{}
+    foreach ($k in $props.Keys) {
+        $name = if ($k -eq 'Salary') { 'Annual Salary' } else { $k }
+        if ($validPropNames -contains $name) { $out[$name] = $props[$k] }
+    }
+    return $out
+}
+
 $filesRoot = $null
 if (-not $NoFiles) { $filesRoot = (Resolve-Path -LiteralPath (New-Item -ItemType Directory -Force -Path $FilesDir)).Path }
 
@@ -250,7 +273,7 @@ for ($i = 1; $i -le $Documents; $i++) {
             $props['Effective Date']    = (DateIn $yr)
         }
     }
-    $obj = [ordered]@{ class = $kind; title = $title; properties = $props }
+    $obj = [ordered]@{ class = (Get-MappedClass $kind); title = $title; properties = $props }
     $file = New-HRFile $title $kind $props
     if ($file) { $obj['files'] = @($file) }
     $docObjs += $obj
@@ -259,6 +282,8 @@ for ($i = 1; $i -le $Documents; $i++) {
 # ---------- emit YAML -------------------------------------------------------
 $root = [ordered]@{}
 if ($ConnectionName) { $root['connection'] = [ordered]@{ name = $ConnectionName } }
+# Keep only property names that exist in the schema (and rename Salary -> Annual Salary).
+foreach ($o in @($deptObjs + $empObjs + $docObjs)) { $o['properties'] = Select-ValidProps $o['properties'] }
 $root['objects'] = @($deptObjs + $empObjs + $docObjs)
 
 $header = @(

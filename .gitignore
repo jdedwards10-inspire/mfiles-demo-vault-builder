@@ -12,9 +12,14 @@ sample-*.yaml
 
 # Generated document files
 *-demo-files/
+*-smoke-files/
 demo-files/
 hr-demo-files/
 factory-test/
+
+# Smoke / scratch test data
+*-smoke.yaml
+hr-smoke.yaml
 
 # Diagnostic / scratch probes
 test-*.ps1
