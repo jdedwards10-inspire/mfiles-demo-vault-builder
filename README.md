@@ -9,9 +9,9 @@ single YAML file, via the M-Files COM API in PowerShell.
    property definitions, and classes. Runs over an administrative
    (Windows-integrated) connection. Alias-driven and **idempotent** — re-running
    skips what exists and only fills gaps.
-2. **Objects** — creates the records in the `objects:` section. Runs over an
-   **early-bound** connection as a named M-Files user (`-User`, or you're
-   prompted for it — so different runs can use different accounts).
+2. **Objects** — creates the records in the `objects:` section, connecting as a
+   named M-Files user (`-User`, or you're prompted for it — so different runs can
+   use different accounts).
 
 ## Quick start with Claude Code (recommended)
 
@@ -39,11 +39,11 @@ author YAML by hand or understand what the build command does.
 
 ## Requirements
 
-- Windows with the **M-Files client/API** installed (registers the COM library).
+- Windows with the **M-Files Desktop client** installed (registers the COM library
+  the tool binds to — all COM access is late-bound, so no interop DLL is shipped or
+  needed; the tool works against whatever M-Files version you have installed).
 - **PowerShell 5.1+**.
 - **`powershell-yaml`** module: `Install-Module powershell-yaml -Scope CurrentUser`
-- **`Interop.MFilesAPI.dll`** in this folder (needed for object creation — the
-  early-bound path). Only required when creating objects; `-SchemaOnly` doesn't need it.
 - An M-Files login (pass `-User`, or enter it at the prompt) that is a **vault
   user with create rights** (and a **vault admin** if you're applying schema).
 
@@ -66,7 +66,7 @@ author YAML by hand or understand what the build command does.
 .\Update-MFilesVault.ps1 -YamlPath .\accounting-firm.yaml -ApplySchema -DryRun
 ```
 
-Useful switches: `-User <login>` (object identity), `-Interop <path>`,
+Useful switches: `-User <login>` (object identity),
 `-SchemaPhase valuelists|objecttypes|properties|classes`, `-CreateMissingLookups`,
 `-AllowDuplicates` (always create objects, skip the existence check),
 `-SingleLogin` (use one M-Files-user connection for both schema and objects).
@@ -162,10 +162,11 @@ skips existing ones).
 
 ## How it works / notes
 
-- **Two connections on purpose:** structure changes need a server-admin
-  connection; object creation needs a vault user *and* early binding (M-Files'
-  `CreateNewObjectEx` has an optional argument that COM *late* binding can't
-  satisfy — hence the interop assembly).
+- **All COM access is late-bound.** Both structure and object creation bind to the
+  installed M-Files client via `New-Object -ComObject 'MFilesAPI.*'`, so there's no
+  interop DLL to ship and the tool works regardless of the server's version. (Object
+  writes built with an early-bound, version-mismatched interop hang on newer cloud
+  servers — late binding avoids that entirely.)
 - **"Users can create objects of this type"** is enabled automatically on object
   types the tool creates (and repaired on existing ones), so object creation
   isn't blocked by permissions.
@@ -186,6 +187,6 @@ skips existing ones).
   the specified ones added). Omit `files:` to leave an object's files untouched.
 
 - **Single-login mode** (`-SingleLogin`): the two connections exist because
-  structure needs server-admin rights and object creation needs a vault user +
-  early binding. When your `-User` account is a vault **admin**, `-SingleLogin`
+  structure changes need an administrative login while object create/update needs a
+  normal one. When your `-User` account is a vault **admin**, `-SingleLogin`
   collapses both into one connection (one credential prompt).

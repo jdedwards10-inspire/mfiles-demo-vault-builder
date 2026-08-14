@@ -35,3 +35,6 @@ Load-Objects.ps1
 Thumbs.db
 .DS_Store
 *.swp
+
+# Proprietary M-Files interop binary - not needed (all COM is late-bound)
+Interop.MFilesAPI.dll

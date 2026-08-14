@@ -9,10 +9,9 @@
         Alias-driven and idempotent; object-type "users can create objects" is
         enabled automatically; auto-created lookup props and default classes are
         adopted (not duplicated).
-      * Objects: the 'objects:' records, created over an EARLY-BOUND connection as
-        a named M-Files user (-User, or prompted) - this requires the interop
-        assembly (Interop.MFilesAPI.dll) because CreateNewObjectEx cannot be called
-        via COM late binding.
+      * Objects: the 'objects:' records, created as a named M-Files user (-User, or
+        prompted). All COM access is LATE-BOUND against the installed M-Files client,
+        so no interop assembly / DLL is required (works regardless of server version).
 
 .PARAMETER YamlPath        Path to the YAML file (except with -ListConnections).
 .PARAMETER ConnectionName  Registered connection name (overrides connection.name).
@@ -21,7 +20,6 @@
 .PARAMETER ApplySchema     Create/refresh the structure sections.
 .PARAMETER SchemaPhase     Limit schema apply (all|valuelists|objecttypes|properties|classes).
 .PARAMETER SchemaOnly      Apply schema only; do not create objects.
-.PARAMETER Interop         Path to Interop.MFilesAPI.dll (needed for objects).
 .PARAMETER User            M-Files login to connect as. If omitted, you are prompted
                            for it (defaulting to the connection's stored user, if any).
 .PARAMETER Password        SecureString; if omitted you are prompted at runtime.
@@ -55,7 +53,6 @@ param(
     [ValidateSet('all','valuelists','objecttypes','properties','classes','workflows','views')]
     [string] $SchemaPhase = 'all',
     [switch] $SchemaOnly,
-    [string] $Interop = "$PSScriptRoot\Interop.MFilesAPI.dll",
     [string] $User,
     [System.Security.SecureString] $Password,
     [string] $NetAddress = 'localhost',
@@ -133,16 +130,6 @@ function Import-YamlFile {
     }
     Import-Module powershell-yaml -ErrorAction Stop
     return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Yaml)
-}
-
-function Import-Interop {
-    param([string] $Path)
-    if (-not ('MFilesAPI.MFilesServerApplicationClass' -as [type])) {
-        if (-not (Test-Path -LiteralPath $Path)) {
-            throw "Interop assembly not found: '$Path'. Object creation needs the .NET interop (Interop.MFilesAPI.dll). Pass -Interop <path>, or use -SchemaOnly."
-        }
-        Add-Type -Path $Path
-    }
 }
 
 # --------------------------------------------------------------------------
@@ -235,15 +222,15 @@ function Connect-SchemaAdminUser {
     if (-not $Guid) { throw "Schema connection needs the vault GUID." }
     $pw = ConvertTo-PlainPassword $Secret $UserName
     Write-Info "Connecting (admin) as M-Files user '$UserName' ($Prot $Addr`:$End, encrypted=$Enc)..."
-    $serverApp = New-Object MFilesAPI.MFilesServerApplicationClass
-    $tz = New-Object MFilesAPI.TimeZoneInformationClass; $tz.LoadWithCurrentTimeZone()
-    [void] $serverApp.ConnectAdministrativeEx($tz, [MFilesAPI.MFAuthType]$Auth, $UserName, $pw, '', $null, $Prot, $Addr, $End, $Enc, '')
+    $serverApp = New-Object -ComObject 'MFilesAPI.MFilesServerApplication'
+    $tz = New-Object -ComObject 'MFilesAPI.TimeZoneInformation'; $tz.LoadWithCurrentTimeZone()
+    [void] $serverApp.ConnectAdministrativeEx($tz, $Auth, $UserName, $pw, '', $null, $Prot, $Addr, $End, $Enc, '')
     $vault = $serverApp.LogInToVaultAdministrative($Guid)
     Write-Ok "Admin-connected as '$($vault.SessionInfo.AccountName)' to '$($vault.Name)'."
     return $vault
 }
 
-# NORMAL (non-administrative) connection as a named M-Files user. Early-bound.
+# NORMAL (non-administrative) connection as a named M-Files user. Late-bound COM.
 # Used for OBJECT create/update. Administrative sessions stall on object
 # search/create over grpc (cloud), so object work uses a normal LogInToVault -
 # this is what the working pre-refactor version did.
@@ -256,10 +243,10 @@ function Connect-ObjectUser {
     if (-not $Guid) { throw "Object connection needs the vault GUID." }
     $pw = ConvertTo-PlainPassword $Secret $UserName
     Write-Info "Connecting as M-Files user '$UserName' ($Prot $Addr`:$End, encrypted=$Enc)..."
-    $serverApp = New-Object MFilesAPI.MFilesServerApplicationClass
-    $tz = New-Object MFilesAPI.TimeZoneInformationClass; $tz.LoadWithCurrentTimeZone()
+    $serverApp = New-Object -ComObject 'MFilesAPI.MFilesServerApplication'
+    $tz = New-Object -ComObject 'MFilesAPI.TimeZoneInformation'; $tz.LoadWithCurrentTimeZone()
     # ConnectEx(TimeZone, AuthType, User, Password, Domain, SPN, Protocol, Address, Endpoint, Encrypted, LocalComputerName, AllowAnonymous)
-    [void] $serverApp.ConnectEx($tz, [MFilesAPI.MFAuthType]$Auth, $UserName, $pw, '', $null, $Prot, $Addr, $End, $Enc, '', $false)
+    [void] $serverApp.ConnectEx($tz, $Auth, $UserName, $pw, '', $null, $Prot, $Addr, $End, $Enc, '', $false)
     $vault = $serverApp.LogInToVault($Guid)
     Write-Ok "Connected as '$($vault.SessionInfo.AccountName)' to '$($vault.Name)'."
     return $vault
@@ -706,11 +693,11 @@ function Set-TypedValue {
     param($Cache, $TypedValue, $PropDef, $Raw)
     $dt = [int] $PropDef.DataType
     switch ($dt) {
-        { $_ -in @(1,13) }   { $TypedValue.SetValue([MFilesAPI.MFDataType]$dt, [string] $Raw); break }
-        2                    { $TypedValue.SetValue([MFilesAPI.MFDataType]2, [int64] $Raw); break }
-        3                    { $TypedValue.SetValue([MFilesAPI.MFDataType]3, [double] $Raw); break }
-        8                    { $TypedValue.SetValue([MFilesAPI.MFDataType]8, [bool] $Raw); break }
-        { $_ -in @(5,6,7) }  { $TypedValue.SetValue([MFilesAPI.MFDataType]$dt, [datetime] $Raw); break }
+        { $_ -in @(1,13) }   { $TypedValue.SetValue($dt, [string] $Raw); break }
+        2                    { $TypedValue.SetValue(2, [int64] $Raw); break }
+        3                    { $TypedValue.SetValue(3, [double] $Raw); break }
+        8                    { $TypedValue.SetValue(8, [bool] $Raw); break }
+        { $_ -in @(5,6,7) }  { $TypedValue.SetValue($dt, [datetime] $Raw); break }
         9 {
             $lk = New-Object -ComObject 'MFilesAPI.Lookup'; $lk.Item = Resolve-LookupId $Cache $PropDef $Raw; $lk.Version = -1
             $TypedValue.SetValueToLookup($lk); break
@@ -731,7 +718,7 @@ function Build-PropertyValues {
     $lk = New-Object -ComObject 'MFilesAPI.Lookup'; $lk.Item = $ClassObj.ID; $null = $pvClass.TypedValue.SetValueToLookup($lk); $null = $pvs.Add(-1, $pvClass)
     if ($ObjDef.Contains('title') -and $ObjDef['title']) {
         $pvTitle = New-Object -ComObject 'MFilesAPI.PropertyValue'; $pvTitle.PropertyDef = $MFBuiltInPropertyDefNameOrTitle
-        $null = $pvTitle.TypedValue.SetValue([MFilesAPI.MFDataType]$MFDatatypeText, [string] $ObjDef['title']); $null = $pvs.Add(-1, $pvTitle)
+        $null = $pvTitle.TypedValue.SetValue($MFDatatypeText, [string] $ObjDef['title']); $null = $pvs.Add(-1, $pvTitle)
     }
     if ($ObjDef.Contains('properties') -and $ObjDef['properties']) {
         foreach ($name in $ObjDef['properties'].Keys) {
@@ -779,25 +766,25 @@ function Find-ExistingObject {
             $pd = Resolve-PropertyDef $Cache $name
             $cond = New-Object -ComObject 'MFilesAPI.SearchCondition'
             $expr = New-Object -ComObject 'MFilesAPI.Expression'
-            $null = $expr.SetPropertyValueExpression($pd.ID, [MFilesAPI.MFParentChildBehavior]0, $null)
+            $null = $expr.SetPropertyValueExpression($pd.ID, 0, $null)
             $tv = New-Object -ComObject 'MFilesAPI.TypedValue'
             $null = Set-TypedValue $Cache $tv $pd $ObjDef['match'][$name]
-            $null = $cond.Set($expr, [MFilesAPI.MFConditionType]1, $tv)
+            $null = $cond.Set($expr, 1, $tv)
             $null = $conds.Add(-1, $cond)
         }
     }
     elseif ($ObjDef.Contains('title') -and $ObjDef['title']) {
         $cond = New-Object -ComObject 'MFilesAPI.SearchCondition'
         $expr = New-Object -ComObject 'MFilesAPI.Expression'
-        $null = $expr.SetPropertyValueExpression($MFBuiltInPropertyDefNameOrTitle, [MFilesAPI.MFParentChildBehavior]0, $null)
+        $null = $expr.SetPropertyValueExpression($MFBuiltInPropertyDefNameOrTitle, 0, $null)
         $tv = New-Object -ComObject 'MFilesAPI.TypedValue'
-        $null = $tv.SetValue([MFilesAPI.MFDataType]$MFDatatypeText, [string] $ObjDef['title'])
-        $null = $cond.Set($expr, [MFilesAPI.MFConditionType]1, $tv)
+        $null = $tv.SetValue($MFDatatypeText, [string] $ObjDef['title'])
+        $null = $cond.Set($expr, 1, $tv)
         $null = $conds.Add(-1, $cond)
     }
     else { return $null }
 
-    $results = $Cache.Vault.ObjectSearchOperations.SearchForObjectsByConditions($conds, [MFilesAPI.MFSearchFlags]0, $false)
+    $results = $Cache.Vault.ObjectSearchOperations.SearchForObjectsByConditions($conds, 0, $false)
     foreach ($r in (ConvertTo-Array $results)) {
         if ($r.ObjVer.Type -eq $ClassObj.ObjectType) { return $r.ObjVer.ObjID }
     }
@@ -966,7 +953,6 @@ if ($needsUser -and -not $User) {
 if ($SingleLogin -or $UseConnectionEndpoint) {
     # One administrative connection as the M-Files user, used for both phases
     # (matches the known-working build). The account needs "Full control of vault".
-    Import-Interop -Path $Interop
     $vault = Connect-SchemaAdminUser -Guid $guid -UserName $User -Secret $Password -Prot $prot -Addr $addr -End $end -Enc $enc -Auth $auth
     if ($ApplySchema)     { Invoke-ApplySchema $vault $doc $SchemaPhase }
     if (-not $SchemaOnly) { Invoke-Objects     $vault $doc }
@@ -977,7 +963,6 @@ else {
         Invoke-ApplySchema $adminVault $doc $SchemaPhase
     }
     if (-not $SchemaOnly) {
-        Import-Interop -Path $Interop
         $objVault = Connect-ObjectUser -Guid $guid -UserName $User -Secret $Password
         Invoke-Objects $objVault $doc
     }

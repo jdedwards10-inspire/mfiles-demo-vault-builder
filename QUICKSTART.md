@@ -21,7 +21,6 @@ system-administrator).
   - `Update-MFilesVault.ps1`   ← the build tool
   - `DemoFileFactory.ps1`      ← builds real pdf/docx/xlsx (no Office needed)
   - `New-DemoData.ps1`, `New-HRDemoData.ps1`  ← demo-data generators (real files)
-  - `Interop.MFilesAPI.dll`    ← required for object creation
   - `.claude/skills/mfiles-demo-vault/`  ← the Claude Code skill (schema author)
   - `README.md`, `QUICKSTART.md`
 - A **cloud vault registered** as a connection in M-Files Desktop, with a login that
@@ -72,9 +71,9 @@ documents with real PDF/Word/Excel files**, use the generator pattern
 
 ## 4. Sharing with the team
 
-Zip the folder (or use an internal Git repo — recommended, so the skill and scripts
-version together). **Include** the scripts, `Interop.MFilesAPI.dll`, the `.claude/`
-skill folder, and these docs. **Exclude** generated output:
+Zip the folder (or use a Git repo — recommended, so the skill and scripts version
+together). **Include** the scripts, the `.claude/` skill folder, and these docs.
+**Exclude** generated output:
 
 - `*-vault.yaml`, `*-demo-data.yaml`   (generated per demo)
 - `*-demo-files\`                      (generated files)
