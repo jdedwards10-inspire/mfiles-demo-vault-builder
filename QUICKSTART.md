@@ -45,16 +45,18 @@ views — all in the tool's exact format.
 
 **b) Apply the structure:**
 ```powershell
-.\Update-MFilesVault.ps1 -YamlPath .\lawfirm-vault.yaml -ApplySchema -SchemaOnly `
-    -Cloud -ConnectionName "MyVault" -User you@corp.com
+.\Update-MFilesVault.ps1 -YamlPath .\lawfirm-vault.yaml -ApplySchema -SchemaOnly -Cloud
 ```
+No connection/user in the command — it **lists your cloud vaults and prompts for the
+vault, username, and password**. (Pass `-ConnectionName "MyVault" -User you@corp.com`
+to skip the prompts.)
 
 **c) Add demo data (optional):** ask Claude for a demo-data file, then:
 ```powershell
-.\Update-MFilesVault.ps1 -YamlPath .\lawfirm-demo-data.yaml `
-    -Cloud -ConnectionName "MyVault" -User you@corp.com
+.\Update-MFilesVault.ps1 -YamlPath .\lawfirm-demo-data.yaml -Cloud -CreateMissingLookups
 ```
-For **bulk documents with real PDF/Word/Excel files**, use the generator pattern
+`-CreateMissingLookups` adds any value-list values the data references. For **bulk
+documents with real PDF/Word/Excel files**, use the generator pattern
 (`New-DemoData.ps1` / `New-HRDemoData.ps1`).
 
 ---

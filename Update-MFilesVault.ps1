@@ -179,6 +179,27 @@ function Get-RegisteredConnection {
     return $null
 }
 
+# Interactive vault picker: list registered connections and let the user choose
+# by number or name. Used when no -ConnectionName / connection.name is supplied,
+# so the generated build command needs no editing.
+function Select-Connection {
+    $conns = ConvertTo-Array (Get-VaultConnections)
+    if ($conns.Count -eq 0) { throw "No registered vault connections found. Register the vault in M-Files Desktop first." }
+    Write-Info "Available vaults:"
+    for ($i = 0; $i -lt $conns.Count; $i++) {
+        '{0,3}) {1,-30} [{2}]' -f ($i + 1), $conns[$i].Name, $conns[$i].ProtocolSequence | Write-Host
+    }
+    while ($true) {
+        $sel = (Read-Host "Which vault? (number or name)").Trim()
+        if ([string]::IsNullOrWhiteSpace($sel)) { continue }
+        $n = 0
+        if ([int]::TryParse($sel, [ref] $n) -and $n -ge 1 -and $n -le $conns.Count) { return [string] $conns[$n - 1].Name }
+        foreach ($c in $conns) { if ($c.Name -eq $sel) { return [string] $c.Name } }
+        foreach ($c in $conns) { if ($c.Name.ToLowerInvariant() -eq $sel.ToLowerInvariant()) { return [string] $c.Name } }
+        Write-Warn2 "  '$sel' didn't match a listed vault - enter a number or exact name."
+    }
+}
+
 # Administrative server connection (Windows-integrated) - for structure. Late-bound.
 function Connect-VaultAdmin {
     param([string] $Guid)
@@ -911,8 +932,11 @@ $doc  = Import-YamlFile -Path $YamlPath
 $conn = @{}; if ($doc.Contains('connection')) { $conn = $doc['connection'] }
 $connName = if ($ConnectionName) { $ConnectionName } elseif ($conn.Contains('name'))  { $conn['name'] }  else { $null }
 $vlt      = if ($VaultGuid)      { $VaultGuid }      elseif ($conn.Contains('vault')) { $conn['vault'] } else { $null }
-if (-not $connName -and -not $vlt) { throw "Specify connection.name / -ConnectionName or connection.vault / -VaultGuid. Use -ListConnections." }
+# No vault specified anywhere -> ask (lists the registered connections to pick from),
+# so the generated command doesn't need a hard-coded -ConnectionName.
+if (-not $connName -and -not $vlt) { $connName = Select-Connection }
 $guid = Resolve-VaultGuid -ConnName $connName -Guid $vlt
+if (-not $guid) { throw "Could not resolve a vault GUID for '$connName'. Use -ListConnections to see available vaults." }
 
 # Resolve the connection endpoint. -UseConnectionEndpoint (alias -Cloud) pulls the
 # protocol/address/port/encryption from the registered connection, so the tool can

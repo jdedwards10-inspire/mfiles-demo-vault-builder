@@ -104,13 +104,14 @@ boolean, lookup, multilookup`.
 ## Build command (give this after writing the YAML)
 
 ```powershell
-.\Update-MFilesVault.ps1 -YamlPath .\<industry>-vault.yaml -ApplySchema -SchemaOnly `
-    -Cloud -ConnectionName "<vault connection>" -User you@corp.com
+.\Update-MFilesVault.ps1 -YamlPath .\<industry>-vault.yaml -ApplySchema -SchemaOnly -Cloud
 ```
 
+The command needs **no editing** — the tool lists the registered cloud vaults and
+**prompts for the vault, username, and password** interactively. (You can still pass
+`-ConnectionName "<vault>" -User you@corp.com` to skip the prompts in automation.)
 Tell them: needs **vault-admin ("Full control of vault")**, not server sysadmin;
-it's **idempotent** (safe to re-run); run `-ListConnections` to find the connection
-name. It prompts for the password.
+it's **idempotent** (safe to re-run).
 
 ## Demo data (offer this)
 
@@ -130,10 +131,17 @@ objects:
       Due Date: 2026-03-03
 ```
 
-Load it with the same command pointed at the demo-data file. For **bulk documents
-with real PDF/Word/Excel files**, point them to `New-DemoData.ps1` /
-`New-HRDemoData.ps1` as the generator pattern (those attach generated files);
-inline `objects:` YAML is best for metadata-only sample records.
+Load it with the same command pointed at the demo-data file (drop `-SchemaOnly`),
+adding **`-CreateMissingLookups`** so any value-list values the data references are
+added automatically:
+
+```powershell
+.\Update-MFilesVault.ps1 -YamlPath .\<industry>-demo-data.yaml -Cloud -CreateMissingLookups
+```
+
+For **bulk documents with real PDF/Word/Excel files**, point them to
+`New-DemoData.ps1` / `New-HRDemoData.ps1` as the generator pattern (those attach
+generated files); inline `objects:` YAML is best for metadata-only sample records.
 
 ## Output style
 
