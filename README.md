@@ -13,6 +13,30 @@ single YAML file, via the M-Files COM API in PowerShell.
    **early-bound** connection as a named M-Files user (`-User`, or you're
    prompted for it — so different runs can use different accounts).
 
+## Quick start with Claude Code (recommended)
+
+This repo ships a Claude Code **skill** (`.claude/skills/mfiles-demo-vault/`) that
+writes a vault schema YAML for any industry on demand — you don't hand-author YAML.
+
+1. Clone this repo, then **open the repo folder as your workspace/project root in
+   Claude Code** — in the desktop app, start the chat *in* the
+   `mfiles-demo-vault-builder` folder (open/select it as the workspace). Do **not**
+   open a different folder and add this one as a secondary directory — Claude Code
+   only discovers skills from the **project root's** `.claude\` folder, so a folder
+   added on the side won't expose the skill.
+2. Type `/mfiles-demo-vault` (it should appear in the `/` list), or just ask:
+   *"build me a law firm demo vault"* (hospital, manufacturer, insurance, HR, …).
+3. The skill writes `<industry>-vault.yaml` into the folder and hands you the exact
+   `Update-MFilesVault.ps1` build command to run against your cloud vault.
+
+> If `/mfiles-demo-vault` doesn't show up, your session root isn't this folder —
+> re-open the repo folder as the workspace root and start a fresh chat (skills are
+> indexed at session start). Alternatively, install it once for every session by
+> copying `.claude\skills\mfiles-demo-vault` into your user-level `~\.claude\skills\`.
+
+Everything below is the underlying tool the skill drives — read on if you want to
+author YAML by hand or understand what the build command does.
+
 ## Requirements
 
 - Windows with the **M-Files client/API** installed (registers the COM library).
