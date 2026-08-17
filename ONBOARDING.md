@@ -46,6 +46,11 @@ In M-Files Desktop, log into the cloud vault you want to build (once) so the too
 see it. Your account needs **"Full control of vault"** (vault admin) on it — *not*
 server System Administrator.
 
+**Use an M-Files user account (not a Windows/domain login) for this admin user.** An
+M-Files-specific login keeps authentication to a single M-Files credential and avoids
+the dual (Windows + M-Files) auth prompt. The tool defaults to M-Files-user auth
+(`-AuthType 3`); only pass `-AuthType 1` if you deliberately want a Windows/SSO login.
+
 ## 5. Build a vault
 
 In the repo folder, in Claude Code:

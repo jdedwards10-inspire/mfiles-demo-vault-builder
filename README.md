@@ -90,6 +90,10 @@ as `-User`, so that account needs **"Full control of vault"** (vault admin) — 
 do **not** need server System Administrator. Auth defaults to M-Files-user
 (`-AuthType 3`); use `-AuthType 1` for Windows/SSO-backed logins.
 
+**Prefer an M-Files user account (not a Windows/domain login) for `-User`.** An
+M-Files-specific login authenticates with a single credential and avoids the dual
+(Windows + M-Files) auth prompt a domain account triggers.
+
 ## YAML format
 
 See [`accounting-firm.yaml`](accounting-firm.yaml). Sections are applied in order.

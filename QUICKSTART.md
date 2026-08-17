@@ -24,7 +24,9 @@ system-administrator).
   - `.claude/skills/mfiles-demo-vault/`  ← the Claude Code skill (schema author)
   - `README.md`, `QUICKSTART.md`
 - A **cloud vault registered** as a connection in M-Files Desktop, with a login that
-  has **"Full control of vault"** (vault admin). Find its name:
+  has **"Full control of vault"** (vault admin). Use an **M-Files user account, not a
+  Windows/domain login**, to avoid the dual (Windows + M-Files) auth prompt. Find its
+  name:
   ```powershell
   .\Update-MFilesVault.ps1 -ListConnections
   ```
