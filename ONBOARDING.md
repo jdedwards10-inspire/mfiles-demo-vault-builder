@@ -1,4 +1,4 @@
-# M-Files Demo Vault Builder — SE Onboarding
+# M‑Files Demo Vault Builder — SE Onboarding
 
 Stand up a fully-populated M-Files **cloud** demo vault for any industry, straight
 from Claude Code. You describe the industry; the `mfiles-demo-vault` skill writes the
@@ -27,8 +27,6 @@ no server system-administrator needed.**
 ```bash
 git clone https://github.com/jdedwards10-inspire/mfiles-demo-vault-builder.git
 ```
-
-(It's a **private** repo — if the clone is denied, ask to be added as a collaborator.)
 
 ## 3. Open it in Claude Code — the one detail that matters
 
