@@ -54,7 +54,13 @@ function New-OoxmlZip {
     param([string]$Path, [hashtable]$Parts)   # name -> xml string
     if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force }
     $zip = [System.IO.Compression.ZipFile]::Open($Path, [System.IO.Compression.ZipArchiveMode]::Create)
-    try { foreach ($k in $Parts.Keys) { Add-ZipText $zip $k $Parts[$k] } } finally { $zip.Dispose() }
+    # [Content_Types].xml MUST be written first - strict OPC readers / server-side
+    # preview converters can fail to render the package otherwise. PowerShell
+    # hashtable key order is non-deterministic, so force the order explicitly.
+    try {
+        $ordered = @('[Content_Types].xml') + ($Parts.Keys | Where-Object { $_ -ne '[Content_Types].xml' })
+        foreach ($k in $ordered) { if ($Parts.ContainsKey($k)) { Add-ZipText $zip $k $Parts[$k] } }
+    } finally { $zip.Dispose() }
 }
 
 # --- DOCX -------------------------------------------------------------------
