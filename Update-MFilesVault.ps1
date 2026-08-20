@@ -88,6 +88,8 @@ $MFDatatypeMultiLineText = 13
 
 $MFBuiltInPropertyDefNameOrTitle = 0
 $MFBuiltInPropertyDefClass       = 100
+$MFBuiltInPropertyDefWorkflow    = 38
+$MFBuiltInPropertyDefState       = 39
 $MFBuiltInValueListUsers         = 17
 $MFAuthTypeSpecificMFilesUser    = 3
 
@@ -209,6 +211,8 @@ function Show-VaultSchema {
     $allPds = ConvertTo-Array $Vault.PropertyDefOperations.GetPropertyDefs()
     $pdById = @{}
     foreach ($pd in $allPds) { $pdById[[int] $pd.ID] = [string] $pd.Name }
+    $wfById = @{}
+    try { foreach ($w in (ConvertTo-Array $Vault.WorkflowOperations.GetWorkflows())) { $wfById[[int] $w.ID] = [string] $w.Name } } catch { }
 
     Write-Host ""
     Write-Info "=== OBJECT TYPES ==="
@@ -216,10 +220,12 @@ function Show-VaultSchema {
         '  {0,-28} (id {1})' -f $ot.NameSingular, $ot.ID | Write-Host
     }
 
-    Write-Info "=== CLASSES (each with its properties; * = required) ==="
+    Write-Info "=== CLASSES (each with its properties; * = required; wf: mandatory workflow) ==="
     foreach ($cl in (ConvertTo-Array $Vault.ClassOperations.GetAllObjectClasses() | Sort-Object Name)) {
         $otName = if ($otById.ContainsKey([int] $cl.ObjectType)) { $otById[[int] $cl.ObjectType] } else { "objType $($cl.ObjectType)" }
-        Write-Host ("  [{0}] {1}" -f $otName, $cl.Name)
+        $wfNote = ''
+        try { if ([int] $cl.Workflow -gt 0) { $wfn = if ($wfById.ContainsKey([int] $cl.Workflow)) { $wfById[[int] $cl.Workflow] } else { "id $($cl.Workflow)" }; $wfNote = "  (wf: $wfn)" } } catch { }
+        Write-Host ("  [{0}] {1}{2}" -f $otName, $cl.Name, $wfNote)
         $props = @()
         foreach ($apd in (ConvertTo-Array $cl.AssociatedPropertyDefs)) {
             $nm = if ($pdById.ContainsKey([int] $apd.PropertyDef)) { $pdById[[int] $apd.PropertyDef] } else { "prop $($apd.PropertyDef)" }
@@ -708,7 +714,55 @@ function New-MetadataCache {
     foreach ($c in (ConvertTo-Array $Vault.ClassOperations.GetAllObjectClasses())) { $classesByName[$c.Name.ToLowerInvariant()] = $c }
     $propsByName = @{}
     foreach ($p in (ConvertTo-Array $Vault.PropertyDefOperations.GetPropertyDefs())) { $propsByName[$p.Name.ToLowerInvariant()] = $p }
-    return [pscustomobject]@{ Vault = $Vault; ClassesByName = $classesByName; PropsByName = $propsByName; ValueListCache = @{} }
+    return [pscustomobject]@{ Vault = $Vault; ClassesByName = $classesByName; PropsByName = $propsByName; ValueListCache = @{}; WorkflowsByName = $null; WorkflowStates = @{} }
+}
+
+# Resolve a workflow name -> its ID (built via WorkflowOperations, cached).
+function Resolve-WorkflowId {
+    param($Cache, [string] $Name)
+    if ($null -eq $Cache.WorkflowsByName) {
+        $m = @{}
+        foreach ($w in (ConvertTo-Array $Cache.Vault.WorkflowOperations.GetWorkflows())) { $m[$w.Name.ToLowerInvariant()] = [int] $w.ID }
+        $Cache.WorkflowsByName = $m
+    }
+    $k = $Name.ToLowerInvariant()
+    if (-not $Cache.WorkflowsByName.ContainsKey($k)) { throw "Workflow '$Name' not found in the vault." }
+    return $Cache.WorkflowsByName[$k]
+}
+
+# The StateAdmin list of a workflow (cached). Each item has .ID and .Name.
+function Get-WorkflowStateList {
+    param($Cache, [int] $WfId)
+    if (-not $Cache.WorkflowStates.ContainsKey($WfId)) {
+        $states = @()
+        try { $states = ConvertTo-Array $Cache.Vault.WorkflowOperations.GetWorkflowAdmin($WfId).States } catch { }
+        $Cache.WorkflowStates[$WfId] = $states
+    }
+    return $Cache.WorkflowStates[$WfId]
+}
+
+# Pick a workflow's initial state: the target of a transition FROM 'No State' (0),
+# else the first state. Returns state ID or -1.
+function Get-WorkflowInitialStateId {
+    param($Cache, [int] $WfId)
+    $states = Get-WorkflowStateList $Cache $WfId
+    if (-not $states -or @($states).Count -eq 0) { return -1 }
+    try {
+        $wfAdmin = $Cache.Vault.WorkflowOperations.GetWorkflowAdmin($WfId)
+        foreach ($t in (ConvertTo-Array $wfAdmin.StateTransitions)) {
+            if ([int] $t.FromState -eq 0) { return [int] $t.ToState }
+        }
+    } catch { }
+    return [int] (@($states)[0].ID)
+}
+
+# Resolve a state name within a workflow -> state ID, else -1.
+function Resolve-WorkflowStateByName {
+    param($Cache, [int] $WfId, [string] $Name)
+    foreach ($s in (Get-WorkflowStateList $Cache $WfId)) {
+        if ($s.Name.ToLowerInvariant() -eq $Name.ToLowerInvariant()) { return [int] $s.ID }
+    }
+    return -1
 }
 
 function Resolve-Class {
@@ -782,6 +836,19 @@ function Build-PropertyValues {
     if ($ObjDef.Contains('title') -and $ObjDef['title']) {
         $pvTitle = New-Object -ComObject 'MFilesAPI.PropertyValue'; $pvTitle.PropertyDef = $MFBuiltInPropertyDefNameOrTitle
         $null = $pvTitle.TypedValue.SetValue($MFDatatypeText, [string] $ObjDef['title']); $null = $pvs.Add(-1, $pvTitle)
+    }
+    # Workflow (+ initial/explicit state) - required for classes with a mandatory
+    # workflow. 'workflow:' by name; optional 'state:' by name (else the workflow's
+    # initial state is used).
+    if ($ObjDef.Contains('workflow') -and $ObjDef['workflow']) {
+        $wfId = Resolve-WorkflowId $Cache ([string] $ObjDef['workflow'])
+        $pvWf = New-Object -ComObject 'MFilesAPI.PropertyValue'; $pvWf.PropertyDef = $MFBuiltInPropertyDefWorkflow
+        $lkWf = New-Object -ComObject 'MFilesAPI.Lookup'; $lkWf.Item = $wfId; $null = $pvWf.TypedValue.SetValueToLookup($lkWf); $null = $pvs.Add(-1, $pvWf)
+        $stId = if ($ObjDef.Contains('state') -and $ObjDef['state']) { Resolve-WorkflowStateByName $Cache $wfId ([string] $ObjDef['state']) } else { Get-WorkflowInitialStateId $Cache $wfId }
+        if ($stId -ge 0) {
+            $pvSt = New-Object -ComObject 'MFilesAPI.PropertyValue'; $pvSt.PropertyDef = $MFBuiltInPropertyDefState
+            $lkSt = New-Object -ComObject 'MFilesAPI.Lookup'; $lkSt.Item = $stId; $null = $pvSt.TypedValue.SetValueToLookup($lkSt); $null = $pvs.Add(-1, $pvSt)
+        }
     }
     if ($ObjDef.Contains('properties') -and $ObjDef['properties']) {
         foreach ($name in $ObjDef['properties'].Keys) {
