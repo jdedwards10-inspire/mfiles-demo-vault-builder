@@ -53,6 +53,10 @@ author YAML by hand or understand what the build command does.
 # List registered connections (to find names/GUIDs)
 .\Update-MFilesVault.ps1 -ListConnections
 
+# Discover an existing vault's schema (object types, classes, properties, value lists)
+# - so you know the real names to build an objects/tagging YAML against it
+.\Update-MFilesVault.ps1 -ListSchema -Cloud
+
 # Structure only (safe to re-run; no object duplicates)
 .\Update-MFilesVault.ps1 -YamlPath .\accounting-firm.yaml -ApplySchema -SchemaOnly
 

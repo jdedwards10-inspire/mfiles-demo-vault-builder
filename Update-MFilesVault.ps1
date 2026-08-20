@@ -17,6 +17,10 @@
 .PARAMETER ConnectionName  Registered connection name (overrides connection.name).
 .PARAMETER VaultGuid       Vault GUID (overrides connection.vault).
 .PARAMETER ListConnections Print registered connections and exit.
+.PARAMETER ListSchema      (alias -ListClasses) Connect read-only and print the vault's
+                           object types, classes (+their properties), property
+                           definitions, and value lists, then exit. Use it to discover
+                           the real names when loading/tagging into an existing vault.
 .PARAMETER ApplySchema     Create/refresh the structure sections.
 .PARAMETER SchemaPhase     Limit schema apply (all|valuelists|objecttypes|properties|classes).
 .PARAMETER SchemaOnly      Apply schema only; do not create objects.
@@ -49,6 +53,8 @@ param(
     [string] $ConnectionName,
     [string] $VaultGuid,
     [switch] $ListConnections,
+    [Alias('ListClasses')]
+    [switch] $ListSchema,
     [switch] $ApplySchema,
     [ValidateSet('all','valuelists','objecttypes','properties','classes','workflows','views')]
     [string] $SchemaPhase = 'all',
@@ -185,6 +191,63 @@ function Select-Connection {
         foreach ($c in $conns) { if ($c.Name.ToLowerInvariant() -eq $sel.ToLowerInvariant()) { return [string] $c.Name } }
         Write-Warn2 "  '$sel' didn't match a listed vault - enter a number or exact name."
     }
+}
+
+# Dump a vault's live metadata - object types, classes (+ their properties),
+# property definitions, and value lists (+ options) - so you can see the real
+# names to build an objects/tagging YAML against an EXISTING vault. Read-only.
+function Show-VaultSchema {
+    param($Vault)
+    $dtNames = @{ 1='Text'; 2='Integer'; 3='Number'; 5='Date'; 6='Time'; 7='Timestamp'; 8='Boolean'; 9='Lookup'; 10='MultiSelectLookup'; 13='MultiLineText' }
+
+    $objTypes = ConvertTo-Array $Vault.ObjectTypeOperations.GetObjectTypes()
+    $otById = @{ 0 = 'Document' }
+    foreach ($ot in $objTypes) { $otById[[int] $ot.ID] = [string] $ot.NameSingular }
+    $valLists = ConvertTo-Array $Vault.ValueListOperations.GetValueLists()
+    $vlById = @{}
+    foreach ($vl in $valLists) { $vlById[[int] $vl.ID] = [string] $vl.NameSingular }
+    $allPds = ConvertTo-Array $Vault.PropertyDefOperations.GetPropertyDefs()
+    $pdById = @{}
+    foreach ($pd in $allPds) { $pdById[[int] $pd.ID] = [string] $pd.Name }
+
+    Write-Host ""
+    Write-Info "=== OBJECT TYPES ==="
+    foreach ($ot in ($objTypes | Sort-Object NameSingular)) {
+        '  {0,-28} (id {1})' -f $ot.NameSingular, $ot.ID | Write-Host
+    }
+
+    Write-Info "=== CLASSES (each with its properties; * = required) ==="
+    foreach ($cl in (ConvertTo-Array $Vault.ClassOperations.GetAllObjectClasses() | Sort-Object Name)) {
+        $otName = if ($otById.ContainsKey([int] $cl.ObjectType)) { $otById[[int] $cl.ObjectType] } else { "objType $($cl.ObjectType)" }
+        Write-Host ("  [{0}] {1}" -f $otName, $cl.Name)
+        $props = @()
+        foreach ($apd in (ConvertTo-Array $cl.AssociatedPropertyDefs)) {
+            $nm = if ($pdById.ContainsKey([int] $apd.PropertyDef)) { $pdById[[int] $apd.PropertyDef] } else { "prop $($apd.PropertyDef)" }
+            $props += ($nm + $(if ($apd.Required) { '*' } else { '' }))
+        }
+        if ($props.Count -gt 0) { Write-Host ("        " + ($props -join ', ')) }
+    }
+
+    Write-Info "=== PROPERTIES (name : type [-> lookup target]) ==="
+    foreach ($pd in ($allPds | Sort-Object Name)) {
+        $t = if ($dtNames.ContainsKey([int] $pd.DataType)) { $dtNames[[int] $pd.DataType] } else { "type$($pd.DataType)" }
+        $tgt = ''
+        if ($pd.BasedOnValueList) {
+            $vln = if ($vlById.ContainsKey([int] $pd.ValueList)) { $vlById[[int] $pd.ValueList] } else { "list $($pd.ValueList)" }
+            $tgt = " -> $vln"
+        }
+        '  {0,-30} {1}{2}' -f $pd.Name, $t, $tgt | Write-Host
+    }
+
+    Write-Info "=== VALUE LISTS (pick options; object-type lists show existing objects) ==="
+    foreach ($vl in ($valLists | Sort-Object NameSingular)) {
+        $names = @()
+        try { $names = @((ConvertTo-Array $Vault.ValueListItemOperations.GetValueListItems([int] $vl.ID)) | ForEach-Object { [string] $_.Name }) } catch { }
+        $shown = if ($names.Count -gt 25) { (@($names[0..24]) -join ', ') + " ... (+$($names.Count - 25) more)" } else { ($names -join ', ') }
+        Write-Host ("  {0} ({1}): {2}" -f $vl.NameSingular, $names.Count, $shown)
+    }
+    Write-Host ""
+    Write-Ok "Schema dump complete - use these names in your objects/tagging YAML."
 }
 
 # Administrative server connection (Windows-integrated) - for structure. Late-bound.
@@ -913,9 +976,9 @@ function Invoke-Objects {
 $script:hadFailures = $false
 
 if ($ListConnections) { Show-Connections; return }
-if (-not $YamlPath)   { throw "YamlPath is required (or use -ListConnections)." }
+if (-not $YamlPath -and -not $ListSchema) { throw "YamlPath is required (or use -ListConnections / -ListSchema)." }
 
-$doc  = Import-YamlFile -Path $YamlPath
+$doc  = if ($YamlPath) { Import-YamlFile -Path $YamlPath } else { @{} }
 $conn = @{}; if ($doc.Contains('connection')) { $conn = $doc['connection'] }
 $connName = if ($ConnectionName) { $ConnectionName } elseif ($conn.Contains('name'))  { $conn['name'] }  else { $null }
 $vlt      = if ($VaultGuid)      { $VaultGuid }      elseif ($conn.Contains('vault')) { $conn['vault'] } else { $null }
@@ -941,13 +1004,21 @@ if ($UseConnectionEndpoint) {
 # Prompt for the M-Files user when we'll connect as one and none was given, so
 # different runs can use different accounts. Default to the connection's stored
 # user when it has one.
-$needsUser = $SingleLogin -or $UseConnectionEndpoint -or (-not $SchemaOnly)
+$needsUser = $SingleLogin -or $UseConnectionEndpoint -or $ListSchema -or (-not $SchemaOnly)
 if ($needsUser -and -not $User) {
     $default = if ($rc -and $rc.UserName) { [string] $rc.UserName } else { '' }
     $label   = if ($default) { "M-Files user [$default]" } else { "M-Files user" }
     $entered = Read-Host $label
     $User    = if ([string]::IsNullOrWhiteSpace($entered)) { $default } else { $entered.Trim() }
     if (-not $User) { throw "A username is required (enter one at the prompt, or pass -User)." }
+}
+
+# -ListSchema: connect read-only (normal login - no vault-admin needed) and dump the
+# vault's object types, classes, properties, and value lists, then exit.
+if ($ListSchema) {
+    $svault = Connect-ObjectUser -Guid $guid -UserName $User -Secret $Password -Prot $prot -Addr $addr -End $end -Enc $enc -Auth $auth
+    Show-VaultSchema $svault
+    return
 }
 
 if ($SingleLogin -or $UseConnectionEndpoint) {
