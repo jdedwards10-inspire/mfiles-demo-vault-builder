@@ -212,7 +212,11 @@ function Show-VaultSchema {
     $pdById = @{}
     foreach ($pd in $allPds) { $pdById[[int] $pd.ID] = [string] $pd.Name }
     $wfById = @{}
-    try { foreach ($w in (ConvertTo-Array $Vault.WorkflowOperations.GetWorkflows())) { $wfById[[int] $w.ID] = [string] $w.Name } } catch { }
+    try {
+        $wfVl = -1
+        foreach ($vl in $valLists) { if ([string] $vl.NameSingular -eq 'Workflow') { $wfVl = [int] $vl.ID; break } }
+        if ($wfVl -ge 0) { foreach ($it in (ConvertTo-Array $Vault.ValueListItemOperations.GetValueListItems($wfVl))) { $wfById[[int] $it.ID] = [string] $it.Name } }
+    } catch { }
 
     Write-Host ""
     Write-Info "=== OBJECT TYPES ==="
@@ -717,17 +721,32 @@ function New-MetadataCache {
     return [pscustomobject]@{ Vault = $Vault; ClassesByName = $classesByName; PropsByName = $propsByName; ValueListCache = @{}; WorkflowsByName = $null; WorkflowStates = @{} }
 }
 
-# Resolve a workflow name -> its ID (built via WorkflowOperations, cached).
-function Resolve-WorkflowId {
-    param($Cache, [string] $Name)
+# Workflow name -> ID map, built from the built-in 'Workflow' value list (workflow
+# IDs == their value-list item IDs). GetWorkflows() isn't reliable across versions.
+function Get-WorkflowMap {
+    param($Cache)
     if ($null -eq $Cache.WorkflowsByName) {
         $m = @{}
-        foreach ($w in (ConvertTo-Array $Cache.Vault.WorkflowOperations.GetWorkflows())) { $m[$w.Name.ToLowerInvariant()] = [int] $w.ID }
+        $wfVlId = -1
+        foreach ($vl in (ConvertTo-Array $Cache.Vault.ValueListOperations.GetValueLists())) {
+            if ([string] $vl.NameSingular -eq 'Workflow') { $wfVlId = [int] $vl.ID; break }
+        }
+        if ($wfVlId -ge 0) {
+            foreach ($it in (ConvertTo-Array $Cache.Vault.ValueListItemOperations.GetValueListItems($wfVlId))) {
+                $m[([string] $it.Name).ToLowerInvariant()] = [int] $it.ID
+            }
+        }
         $Cache.WorkflowsByName = $m
     }
+    return $Cache.WorkflowsByName
+}
+
+function Resolve-WorkflowId {
+    param($Cache, [string] $Name)
+    $m = Get-WorkflowMap $Cache
     $k = $Name.ToLowerInvariant()
-    if (-not $Cache.WorkflowsByName.ContainsKey($k)) { throw "Workflow '$Name' not found in the vault." }
-    return $Cache.WorkflowsByName[$k]
+    if (-not $m.ContainsKey($k)) { throw "Workflow '$Name' not found in the vault." }
+    return $m[$k]
 }
 
 # The StateAdmin list of a workflow (cached). Each item has .ID and .Name.
@@ -840,8 +859,10 @@ function Build-PropertyValues {
     # Workflow (+ initial/explicit state) - required for classes with a mandatory
     # workflow. 'workflow:' by name; optional 'state:' by name (else the workflow's
     # initial state is used).
-    if ($ObjDef.Contains('workflow') -and $ObjDef['workflow']) {
-        $wfId = Resolve-WorkflowId $Cache ([string] $ObjDef['workflow'])
+    $wfId = $null
+    if ($ObjDef.Contains('workflow_id') -and $ObjDef['workflow_id']) { $wfId = [int] $ObjDef['workflow_id'] }
+    elseif ($ObjDef.Contains('workflow') -and $ObjDef['workflow']) { $wfId = Resolve-WorkflowId $Cache ([string] $ObjDef['workflow']) }
+    if ($null -ne $wfId) {
         $pvWf = New-Object -ComObject 'MFilesAPI.PropertyValue'; $pvWf.PropertyDef = $MFBuiltInPropertyDefWorkflow
         $lkWf = New-Object -ComObject 'MFilesAPI.Lookup'; $lkWf.Item = $wfId; $null = $pvWf.TypedValue.SetValueToLookup($lkWf); $null = $pvs.Add(-1, $pvWf)
         $stId = if ($ObjDef.Contains('state') -and $ObjDef['state']) { Resolve-WorkflowStateByName $Cache $wfId ([string] $ObjDef['state']) } else { Get-WorkflowInitialStateId $Cache $wfId }
